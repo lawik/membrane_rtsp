@@ -28,6 +28,8 @@ defmodule Membrane.RTSP.Server do
 
   alias __MODULE__.Conn
 
+  @accept_retry_interval 100
+
   @type server_option ::
           {:handler, module()}
           | {:handler_config, term()}
@@ -226,8 +228,14 @@ defmodule Membrane.RTSP.Server do
       {:error, :closed} ->
         :ok
 
+      # e.g. :emfile / :enfile when running out of file descriptors or a transient
+      # error like :econnaborted. The acceptor is linked to the server, so raising here
+      # would take the server down along with all of its client connections. Back off
+      # briefly and keep accepting instead.
       {:error, reason} ->
-        raise("error occurred when accepting client connection: #{inspect(reason)}")
+        Logger.error("error occurred when accepting client connection: #{inspect(reason)}")
+        Process.sleep(@accept_retry_interval)
+        do_listen(socket, parent_pid)
     end
   end
 end
