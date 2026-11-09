@@ -63,6 +63,26 @@ defmodule Membrane.RTSP.ResponseTest do
     end
   end
 
+  describe "Malformed responses" do
+    test "parse/1 returns an error when the headers are not terminated by an empty line" do
+      assert {:error, :malformed_response} = Response.parse("RTSP/1.0 200 OK\r\nCSeq: 1\r\n")
+    end
+
+    test "verify_content_length/1 treats a non-numeric Content-Length as missing" do
+      assert Response.verify_content_length(
+               "RTSP/1.0 200 OK\r\nCSeq: 2\r\nContent-Length: abc\r\n\r\n"
+             ) == {:ok, 0, 0}
+
+      assert Response.verify_content_length(
+               "RTSP/1.0 200 OK\r\nCSeq: 2\r\nContent-Length: abc\r\n\r\nbody"
+             ) == {:error, 0, 4}
+
+      assert Response.verify_content_length(
+               "RTSP/1.0 200 OK\r\nCSeq: 2\r\nContent-Length: -5\r\n\r\nbody"
+             ) == {:error, 0, 4}
+    end
+  end
+
   describe "Header lookup" do
     test "get_header/2 matches header names case-insensitively" do
       response = %Response{status: 200, version: "1.0", headers: [{"content-LENGTH", "0"}]}

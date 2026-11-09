@@ -142,6 +142,20 @@ defmodule Membrane.RTSP.SessionLogicTest do
     assert state.auth == {:digest, %{nonce: "nonce", realm: "realm", qop: nil, nc: 2}}
   end
 
+  test "returns an error on a digest challenge without nonce or realm", %{
+    state: state,
+    request: request
+  } do
+    for challenge <- ["Digest realm=\"realm\"", "Digest nonce=\"nonce\"", "Digest "] do
+      mock(:gen_tcp, [send: 2], fn _socket, _request ->
+        {:ok, "RTSP/1.0 401 Unauthorized\r\nWWW-Authenticate: #{challenge}\r\n\r\n"}
+      end)
+
+      assert {:reply, {:error, :invalid_digest_challenge}, ^state} =
+               RTSP.handle_call({:execute, request}, nil, state)
+    end
+  end
+
   test "add digest information with qop in the state (RFC 2617)", %{
     state: state,
     request: request

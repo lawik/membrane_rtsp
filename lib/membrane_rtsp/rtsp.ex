@@ -391,12 +391,12 @@ defmodule Membrane.RTSP do
 
   # Checks for the `nonce` and `realm` values in the `WWW-Authenticate` header.
   # if they exist, sets `type` to `{:digest, opts}`
-  @spec detect_authentication_type(Response.t(), State.t()) :: {:ok, State.t()}
+  @spec detect_authentication_type(Response.t(), State.t()) ::
+          {:ok, State.t()} | {:error, :invalid_digest_challenge}
   defp detect_authentication_type(%Response{} = response, state) do
-    with {:ok, "Digest " <> digest} <- Response.get_header(response, "WWW-Authenticate") do
-      [_match, nonce] = Regex.run(~r/nonce=\"(?<nonce>.*)\"/U, digest)
-      [_match, realm] = Regex.run(~r/realm=\"(?<realm>.*)\"/U, digest)
-
+    with {:ok, "Digest " <> digest} <- Response.get_header(response, "WWW-Authenticate"),
+         [_match, nonce] <- Regex.run(~r/nonce=\"(?<nonce>.*)\"/U, digest),
+         [_match, realm] <- Regex.run(~r/realm=\"(?<realm>.*)\"/U, digest) do
       qop =
         case Regex.run(~r/qop=\"?([^",]+)\"?/, digest) do
           [_match, qop_value] -> qop_value
@@ -412,6 +412,10 @@ defmodule Membrane.RTSP do
 
       {:error, :no_such_header} ->
         {:ok, state}
+
+      # Digest challenge without a nonce or a realm, we cannot authenticate with it
+      nil ->
+        {:error, :invalid_digest_challenge}
     end
   end
 end

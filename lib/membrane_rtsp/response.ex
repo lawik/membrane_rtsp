@@ -55,14 +55,17 @@ defmodule Membrane.RTSP.Response do
   If the body is present it will be parsed according to `Content-Type` header.
   Currently only the `application/sdp` is supported.
   """
-  @spec parse(binary()) :: {:ok, t()} | {:error, :invalid_start_line | :malformed_header}
+  @spec parse(binary()) :: {:ok, t()} | {:error, atom() | {:malformed_header, binary()}}
   def parse(response) do
-    [headers, body] = String.split(response, ["\r\n\r\n", "\n\n", "\r\r"], parts: 2)
-
-    with {:ok, {%__MODULE__{} = response, headers}} <- parse_start_line(headers),
+    with [headers, body] <- String.split(response, ["\r\n\r\n", "\n\n", "\r\r"], parts: 2),
+         {:ok, {%__MODULE__{} = response, headers}} <- parse_start_line(headers),
          {:ok, headers} <- parse_headers(headers),
          {:ok, body} <- parse_body(body, headers) do
       {:ok, %__MODULE__{response | headers: headers, body: body}}
+    else
+      # no empty line terminating the headers
+      [_headers] -> {:error, :malformed_response}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -115,23 +118,31 @@ defmodule Membrane.RTSP.Response do
          false <- is_nil(body),
          body_size <- byte_size(body),
          {:ok, content_length_str} <-
-           get_header(%__MODULE__{response | headers: headers}, "Content-Length") do
-      {content_length, _remainder} = Integer.parse(content_length_str)
-
+           get_header(%__MODULE__{response | headers: headers}, "Content-Length"),
+         {:ok, content_length} <- parse_content_length(content_length_str) do
       if body_size == content_length do
         {:ok, content_length, body_size}
       else
         {:error, content_length, body_size}
       end
     else
-      {:error, :no_such_header} when byte_size(body) == 0 ->
+      # a `Content-Length` that is not a non-negative integer is treated as if it was missing
+      {:error, reason}
+      when reason in [:no_such_header, :invalid_content_length] and byte_size(body) == 0 ->
         {:ok, 0, 0}
 
-      {:error, :no_such_header} ->
+      {:error, reason} when reason in [:no_such_header, :invalid_content_length] ->
         {:error, 0, byte_size(body)}
 
       _other ->
         {:error, 0, 0}
+    end
+  end
+
+  defp parse_content_length(content_length_str) do
+    case Integer.parse(content_length_str) do
+      {content_length, _remainder} when content_length >= 0 -> {:ok, content_length}
+      _other -> {:error, :invalid_content_length}
     end
   end
 
